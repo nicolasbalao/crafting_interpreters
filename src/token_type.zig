@@ -27,7 +27,7 @@ pub const TokenType = enum {
     STRING,
     NUMBER,
 
-    // Keybords
+    // Keywords
     AND,
     CLASS,
     ELSE,
