@@ -5,8 +5,6 @@ const Literal = TokenLib.Literal;
 const TokenTypeLib = @import("token_type.zig");
 const TokenType = TokenTypeLib.TokenType;
 
-//const Keywords = enum { AND, CLASS, ELSE, FALSE, FOR, FUN, IF, NIL, OR, PRINT, RETURN, SUPER, THIS, TRUE, VAR, WHILE };
-
 const keywords_map = std.StaticStringMap(TokenType).initComptime(.{
     .{ "and", .AND },
     .{ "class", .CLASS },
@@ -25,6 +23,9 @@ const keywords_map = std.StaticStringMap(TokenType).initComptime(.{
     .{ "var", .VAR },
     .{ "while", .WHILE },
 });
+
+const ScanError = error{ UnexpectedChar, UnterminedString };
+const ScannerError = ScanError || std.mem.Allocator.Error || std.fmt.ParseFloatError;
 
 pub const Scanner = struct {
     source: []const u8,
@@ -58,8 +59,8 @@ pub const Scanner = struct {
         return self.current >= self.source.len;
     }
 
-    fn scanToken(self: *Scanner) !void {
-        const char: u8 = self.advance();
+    fn scanToken(self: *Scanner) ScannerError!void {
+        const char: u8 = self.advance() orelse return;
 
         switch (char) {
             '(' => try self.addToken(TokenType.LEFT_PAREN, null),
@@ -92,24 +93,20 @@ pub const Scanner = struct {
                 // TODO refactor this with maybe a switch ?
                 if (isDigit(char)) {
                     try self.number();
+                } else if (isAlpha(char)) {
+                    try self.identifier();
+                } else if (char == ' ' or char == '\r' or char == '\t') {
+                    // ignore white space
                 } else {
-                    if (isAlpha(char)) {
-                        try self.identifier();
-                    }
-                    // error
+                    return ScannerError.UnexpectedChar;
                 }
-                // ignore this
-                //' ', '\r', '\t' =>
             },
         }
     }
 
-    fn advance(self: *Scanner) u8 {
+    fn advance(self: *Scanner) ?u8 {
+        if (self.current >= self.source.len) return null;
         defer self.current += 1;
-        if (self.current >= self.source.len) {
-            // TODO refactor this with error or something else ?
-            return '\x00';
-        }
         return self.source[self.current];
     }
 
@@ -122,7 +119,6 @@ pub const Scanner = struct {
 
     fn match(self: *Scanner, expected_char: u8) bool {
         if (self.isAtEnd()) return false;
-        // TODO: see if is self.current or self.current + 1
         if (self.source[self.current] != expected_char) return false;
 
         self.current += 1;
@@ -135,7 +131,7 @@ pub const Scanner = struct {
         return self.source[self.current];
     }
 
-    fn string(self: *Scanner) !void {
+    fn string(self: *Scanner) ScannerError!void {
         while (self.peek() != '"' and !self.isAtEnd()) {
             if (self.peek() == '\n') {
                 self.line += 1;
@@ -144,8 +140,7 @@ pub const Scanner = struct {
         }
 
         if (self.isAtEnd()) {
-            //TODO  Error
-            return;
+            return ScannerError.UnterminedString;
         }
 
         _ = self.advance();
@@ -158,18 +153,21 @@ pub const Scanner = struct {
     fn number(self: *Scanner) !void {
         while (isDigit(self.peek())) _ = self.advance();
 
-        if (self.peek() == '.' and isDigit(self.peekNext())) {
+        if (self.peek() == '.' and self.peekNext() != null and isDigit(self.peekNext().?)) {
             _ = self.advance();
             while (isDigit(self.peek())) _ = self.advance();
         }
 
+        // Note: with this function function we take the dote ex 12.
+        // And zig parseFloat handle it 12. -> 12
+        // Maybe we should remove the dote before
         const value: f64 = try std.fmt.parseFloat(f64, self.source[self.start..self.current]);
 
         try self.addToken(TokenType.NUMBER, Literal{ .Number = value });
     }
 
-    fn peekNext(self: Scanner) u8 {
-        if (self.current + 1 >= self.source.len) return '\x00';
+    fn peekNext(self: Scanner) ?u8 {
+        if (self.current + 1 >= self.source.len) return null;
         return self.source[self.current + 1];
     }
 
@@ -357,6 +355,7 @@ test "Scanner.scanTokens should extract token from source" {
 
     var expected_tokens = std.ArrayList(Token).init(gpa_alloc);
     defer expected_tokens.deinit();
+
     try expected_tokens.append(Token.init(TokenType.VAR, "var", Literal.None, 1));
     try expected_tokens.append(Token.init(TokenType.IDENTIFIER, "test", Literal.None, 1));
     try expected_tokens.append(Token.init(TokenType.EQUAL, "=", Literal.None, 1));
@@ -383,4 +382,22 @@ test "Scanner.scanTokens should extract token from source" {
         }
         try std.testing.expectEqual(expected_tokens.items[i].line, actual_token.line);
     }
+}
+
+test "Scanner.scanTokens should error unexpectedChar" {
+    const source: []const u8 = "var 😂 = 1";
+    const allocator: std.mem.Allocator = std.testing.allocator;
+    var scanner = Scanner.init(source, allocator);
+    defer scanner.deinit();
+
+    try std.testing.expectError(ScannerError.UnexpectedChar, scanner.scanTokens());
+}
+
+test "Scanner.scanTokens should error UnterminedString" {
+    const source: []const u8 = "print \"test";
+    const allocator: std.mem.Allocator = std.testing.allocator;
+    var scanner = Scanner.init(source, allocator);
+    defer scanner.deinit();
+
+    try std.testing.expectError(ScannerError.UnterminedString, scanner.scanTokens());
 }
