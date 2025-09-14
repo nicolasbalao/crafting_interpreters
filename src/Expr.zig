@@ -5,26 +5,18 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const TokenType = @import("token_type.zig").TokenType;
 
-// TODO make script for generate this file ?
-pub const exprEnum = enum {
-    binary,
-    grouping,
-    literal,
-    unary,
-};
-
 // We use *Expr because a pointer has a known, fixed size,
 // while Expr itself would be recursive and lead to an infinite size.
-pub const Expr2 = union(enum) {
+pub const Expr = union(enum) {
     Binary: struct {
-        left: *Expr2,
+        left: *Expr,
         operator: Token,
-        right: *Expr2,
+        right: *Expr,
     },
     Grouping: struct {
-        expr: *Expr2,
+        expr: *Expr,
 
-        pub fn toString(self: Expr2, buf: *std.ArrayList(u8)) ![]const u8 {
+        pub fn toString(self: Expr, buf: *std.ArrayList(u8)) ![]const u8 {
             //try buf.append('(');
             try buf.appendSlice("group");
             //try buf.append(' ');
@@ -37,11 +29,11 @@ pub const Expr2 = union(enum) {
     },
     Unary: struct {
         left: Token,
-        right: *Expr2,
+        right: *Expr,
     },
 };
 
-pub fn toString(allocator: Allocator, expr: *const Expr2) ![]const u8 {
+pub fn toString(allocator: Allocator, expr: *const Expr) ![]const u8 {
     var buf = std.ArrayList(u8).init(allocator);
     // TODO: make more research about it
     // Because we use toOwnedSlice
@@ -95,6 +87,7 @@ pub fn toString(allocator: Allocator, expr: *const Expr2) ![]const u8 {
 }
 
 test "Expr toString should work as expected" {
+    // Test: -123 * (45.67)
     var allocator = std.testing.allocator;
     // Simule les tokens nécessaires
     const minus_token = Token{
@@ -111,28 +104,29 @@ test "Expr toString should work as expected" {
     };
 
     // Alloue les sous-expressions
-    const literal_123 = try allocator.create(Expr2);
+    const literal_123 = try allocator.create(Expr);
     defer allocator.destroy(literal_123);
 
-    literal_123.* = Expr2{ .Literal = .{ .value = LiteralType{ .Number = 123 } } };
+    literal_123.* = Expr{ .Literal = .{ .value = LiteralType{ .Number = 123 } } };
 
-    const unary_minus = try allocator.create(Expr2);
+    const unary_minus = try allocator.create(Expr);
     defer allocator.destroy(unary_minus);
-    unary_minus.* = Expr2{ .Unary = .{ .left = minus_token, .right = literal_123 } };
+    unary_minus.* = Expr{ .Unary = .{ .left = minus_token, .right = literal_123 } };
 
-    const literal_45_67 = try allocator.create(Expr2);
+    const literal_45_67 = try allocator.create(Expr);
     defer allocator.destroy(literal_45_67);
-    literal_45_67.* = Expr2{ .Literal = .{ .value = LiteralType{ .Number = 45.67 } } };
+    literal_45_67.* = Expr{ .Literal = .{ .value = LiteralType{ .Number = 45.67 } } };
 
-    const grouping = try allocator.create(Expr2);
+    const grouping = try allocator.create(Expr);
     defer allocator.destroy(grouping);
-    grouping.* = Expr2{ .Grouping = .{ .expr = literal_45_67 } };
+    grouping.* = Expr{ .Grouping = .{ .expr = literal_45_67 } };
 
-    const binary = Expr2{ .Binary = .{
+    const binary = Expr{ .Binary = .{
         .left = unary_minus,
         .operator = star_token,
         .right = grouping,
     } };
+
 
     const expr_string = try toString(allocator, &binary);
     defer allocator.free(expr_string);
